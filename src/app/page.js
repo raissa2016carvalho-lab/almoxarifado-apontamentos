@@ -9,6 +9,13 @@ import {
 } from "firebase/auth";
 import { db, auth } from "@/lib/firebase";
 
+const ATIVIDADES = [
+  "Recebimento de mercadorias","Conferência de estoque","Separação de pedidos",
+  "Organização de prateleiras","Inventário","Emissão de nota fiscal",
+  "Carregamento / expedição","Devolução de produtos","Limpeza e organização",
+  "Atendimento interno","Outra",
+];
+
 function formatDuration(startSeconds) {
   if (!startSeconds) return "...";
   const diff = Math.floor(Date.now() / 1000) - startSeconds;
@@ -27,35 +34,34 @@ function formatTime(ts) {
 }
 
 function getInitials(name) {
+  if (!name) return "?";
   return name.split(" ").slice(0, 2).map((n) => n[0]).join("").toUpperCase();
 }
 
 const COLORS = ["#e63946","#2a9d8f","#e9c46a","#264653","#f4a261","#457b9d"];
 function getColor(name) {
+  if (!name) return COLORS[0];
   let h = 0;
   for (let i = 0; i < name.length; i++) h += name.charCodeAt(i);
   return COLORS[h % COLORS.length];
 }
 
-const ATIVIDADES = [
-  "Recebimento de mercadorias","Conferência de estoque","Separação de pedidos",
-  "Organização de prateleiras","Inventário","Emissão de nota fiscal",
-  "Carregamento / expedição","Devolução de produtos","Limpeza e organização",
-  "Atendimento interno","Outra",
-];
-
 export default function FuncionarioPage() {
-  const [user, setUser] = useState(undefined); // undefined = carregando
-  const [perfil, setPerfil] = useState(null); // dados do Firestore
+  const [mounted, setMounted] = useState(false);
+  const [user, setUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [perfil, setPerfil] = useState(null);
   const [loginForm, setLoginForm] = useState({ email: "", senha: "" });
   const [loginErro, setLoginErro] = useState("");
   const [loginLoad, setLoginLoad] = useState(false);
-
   const [step, setStep] = useState("inicio");
   const [form, setForm] = useState({ atividade: "", obs: "" });
   const [atividadeAtiva, setAtividadeAtiva] = useState(null);
   const [loading, setLoading] = useState(false);
   const [tick, setTick] = useState(0);
+
+  // Garante que só renderiza no client
+  useEffect(() => { setMounted(true); }, []);
 
   // Timer
   useEffect(() => {
@@ -65,23 +71,25 @@ export default function FuncionarioPage() {
 
   // Auth state
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
+    if (!mounted) return;
+    const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u || null);
-      if (u) {
-        // Busca perfil no Firestore
-        const q = query(collection(db, "funcionarios"), where("uid", "==", u.uid));
-        const unsub2 = onSnapshot(q, (snap) => {
-          if (!snap.empty) setPerfil({ id: snap.docs[0].id, ...snap.docs[0].data() });
-        });
-        return () => unsub2();
-      } else {
-        setPerfil(null);
-      }
+      setAuthReady(true);
     });
     return () => unsub();
-  }, []);
+  }, [mounted]);
 
-  // Atividade ativa do usuário logado
+  // Perfil do Firestore
+  useEffect(() => {
+    if (!user) { setPerfil(null); return; }
+    const q = query(collection(db, "funcionarios"), where("uid", "==", user.uid));
+    const unsub = onSnapshot(q, (snap) => {
+      if (!snap.empty) setPerfil({ id: snap.docs[0].id, ...snap.docs[0].data() });
+    });
+    return () => unsub();
+  }, [user]);
+
+  // Atividade ativa
   useEffect(() => {
     if (!user) return;
     const q = query(
@@ -95,7 +103,7 @@ export default function FuncionarioPage() {
         setStep("emAndamento");
       } else {
         setAtividadeAtiva(null);
-        setStep("inicio");
+        setStep((s) => s === "emAndamento" ? "inicio" : s);
       }
     });
     return () => unsub();
@@ -125,6 +133,7 @@ export default function FuncionarioPage() {
         fim: null,
         status: "ativo",
       });
+      setForm({ atividade: "", obs: "" });
     } catch (e) {
       alert("Erro: " + e.message);
     }
@@ -147,77 +156,19 @@ export default function FuncionarioPage() {
     setLoading(false);
   }
 
-  // Carregando auth
-  if (user === undefined) {
+  // Ainda não montou no client
+  if (!mounted || !authReady) {
     return (
-      <div className="loading-screen">
-        <div className="spinner" />
-        <p>Carregando...</p>
-        <style>{`
-          * { box-sizing: border-box; margin: 0; padding: 0; }
-          body { font-family: 'Inter', system-ui, sans-serif; background: #f1f5f9; }
-          .loading-screen { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; color: #64748b; }
-          .spinner { width: 36px; height: 36px; border: 3px solid #e2e8f0; border-top-color: #0f4c75; border-radius: 50%; animation: spin 0.8s linear infinite; }
-          @keyframes spin { to { transform: rotate(360deg); } }
-        `}</style>
-      </div>
+      <>
+        <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"1rem",color:"#64748b",fontFamily:"system-ui,sans-serif",background:"#f1f5f9"}}>
+          <div style={{width:36,height:36,border:"3px solid #e2e8f0",borderTopColor:"#0f4c75",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+          <p>Carregando...</p>
+        </div>
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      </>
     );
   }
 
-  // Não logado — tela de login
-  if (!user) {
-    return (
-      <div className="page">
-        <header className="header">
-          <div className="header-inner">
-            <div className="logo">
-              <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-                <rect width="28" height="28" rx="8" fill="#0f4c75"/>
-                <rect x="5" y="8" width="18" height="3" rx="1.5" fill="white"/>
-                <rect x="5" y="13" width="12" height="3" rx="1.5" fill="white" opacity="0.7"/>
-                <rect x="5" y="18" width="15" height="3" rx="1.5" fill="white" opacity="0.5"/>
-              </svg>
-              <div>
-                <span className="logo-title">Almoxarifado</span>
-                <span className="logo-sub">Apontamento de Atividades</span>
-              </div>
-            </div>
-          </div>
-        </header>
-        <main className="main">
-          <div className="card-form">
-            <h1>Entrar</h1>
-            <p className="subtitle">Use o login fornecido pelo seu gestor.</p>
-            <div className="form-group">
-              <label>Email</label>
-              <input
-                type="email" placeholder="seu@email.com"
-                value={loginForm.email}
-                onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
-                onKeyDown={(e) => e.key === "Enter" && fazerLogin()}
-              />
-            </div>
-            <div className="form-group">
-              <label>Senha</label>
-              <input
-                type="password" placeholder="••••••••"
-                value={loginForm.senha}
-                onChange={(e) => setLoginForm({ ...loginForm, senha: e.target.value })}
-                onKeyDown={(e) => e.key === "Enter" && fazerLogin()}
-              />
-            </div>
-            {loginErro && <p className="erro">{loginErro}</p>}
-            <button className="btn-iniciar" onClick={fazerLogin} disabled={!loginForm.email || !loginForm.senha || loginLoad}>
-              {loginLoad ? "Entrando..." : "Entrar"}
-            </button>
-          </div>
-        </main>
-        <style>{styles}</style>
-      </div>
-    );
-  }
-
-  // Logado
   return (
     <div className="page">
       <header className="header">
@@ -234,11 +185,9 @@ export default function FuncionarioPage() {
               <span className="logo-sub">Apontamento de Atividades</span>
             </div>
           </div>
-          {perfil && (
+          {user && perfil && (
             <div className="user-bar">
-              <div className="avatar-sm" style={{ background: getColor(perfil.nome) }}>
-                {getInitials(perfil.nome)}
-              </div>
+              <div className="avatar-sm" style={{background:getColor(perfil.nome)}}>{getInitials(perfil.nome)}</div>
               <span className="user-nome">{perfil.nome}</span>
               <button className="btn-sair" onClick={() => signOut(auth)}>Sair</button>
             </div>
@@ -247,13 +196,36 @@ export default function FuncionarioPage() {
       </header>
 
       <main className="main">
-        {step === "inicio" && (
+        {!user && (
           <div className="card-form">
-            <h1>Olá, {perfil?.nome?.split(" ")[0]}! 👋</h1>
+            <h1>Entrar</h1>
+            <p className="subtitle">Use o login fornecido pelo seu gestor.</p>
+            <div className="form-group">
+              <label>Email</label>
+              <input type="email" placeholder="seu@email.com" value={loginForm.email}
+                onChange={(e) => setLoginForm({...loginForm, email: e.target.value})}
+                onKeyDown={(e) => e.key === "Enter" && fazerLogin()} />
+            </div>
+            <div className="form-group">
+              <label>Senha</label>
+              <input type="password" placeholder="••••••••" value={loginForm.senha}
+                onChange={(e) => setLoginForm({...loginForm, senha: e.target.value})}
+                onKeyDown={(e) => e.key === "Enter" && fazerLogin()} />
+            </div>
+            {loginErro && <p className="erro">{loginErro}</p>}
+            <button className="btn-iniciar" onClick={fazerLogin} disabled={!loginForm.email || !loginForm.senha || loginLoad}>
+              {loginLoad ? "Entrando..." : "Entrar"}
+            </button>
+          </div>
+        )}
+
+        {user && step === "inicio" && (
+          <div className="card-form">
+            <h1>Olá, {perfil?.nome?.split(" ")[0] || ""}! 👋</h1>
             <p className="subtitle">Selecione a atividade que vai iniciar.</p>
             <div className="form-group">
               <label>Atividade</label>
-              <select value={form.atividade} onChange={(e) => setForm({ ...form, atividade: e.target.value })}>
+              <select value={form.atividade} onChange={(e) => setForm({...form, atividade: e.target.value})}>
                 <option value="">Selecione...</option>
                 {ATIVIDADES.map((a) => <option key={a} value={a}>{a}</option>)}
               </select>
@@ -261,7 +233,8 @@ export default function FuncionarioPage() {
             {form.atividade && (
               <div className="form-group">
                 <label>Observação <span className="opt">(opcional)</span></label>
-                <textarea placeholder="Detalhes adicionais..." value={form.obs} onChange={(e) => setForm({ ...form, obs: e.target.value })} rows={3} />
+                <textarea placeholder="Detalhes adicionais..." value={form.obs}
+                  onChange={(e) => setForm({...form, obs: e.target.value})} rows={3} />
               </div>
             )}
             <button className="btn-iniciar" onClick={iniciarAtividade} disabled={!form.atividade || loading}>
@@ -270,13 +243,13 @@ export default function FuncionarioPage() {
           </div>
         )}
 
-        {step === "emAndamento" && atividadeAtiva && (
+        {user && step === "emAndamento" && atividadeAtiva && (
           <div className="card-andamento">
             <div className="andamento-header">
-              <div className="avatar-lg" style={{ background: getColor(atividadeAtiva.funcionario) }}>
+              <div className="avatar-lg" style={{background:getColor(atividadeAtiva.funcionario)}}>
                 {getInitials(atividadeAtiva.funcionario)}
               </div>
-              <div className="pulse-ring" />
+              <div className="pulse-ring"/>
             </div>
             <h2 className="and-nome">{atividadeAtiva.funcionario}</h2>
             <p className="and-ativ">{atividadeAtiva.atividade}</p>
@@ -292,7 +265,7 @@ export default function FuncionarioPage() {
           </div>
         )}
 
-        {step === "sucesso" && (
+        {user && step === "sucesso" && (
           <div className="card-sucesso">
             <div className="sucesso-icon">✓</div>
             <h2>Atividade finalizada!</h2>
@@ -300,55 +273,55 @@ export default function FuncionarioPage() {
           </div>
         )}
       </main>
-      <style>{styles}</style>
+
+      <style>{`
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{font-family:'Inter',system-ui,sans-serif;background:#f1f5f9;min-height:100vh}
+        .page{min-height:100vh;display:flex;flex-direction:column}
+        .header{background:#0f4c75}
+        .header-inner{max-width:600px;margin:0 auto;padding:0 1.5rem;height:60px;display:flex;align-items:center;justify-content:space-between}
+        .logo{display:flex;align-items:center;gap:10px}
+        .logo-title{display:block;font-size:16px;font-weight:700;color:white;line-height:1.1}
+        .logo-sub{display:block;font-size:11px;color:rgba(255,255,255,0.6)}
+        .user-bar{display:flex;align-items:center;gap:8px}
+        .avatar-sm{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;color:white}
+        .user-nome{font-size:13px;color:rgba(255,255,255,0.85)}
+        .btn-sair{background:rgba(255,255,255,0.15);border:none;color:white;padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer}
+        .btn-sair:hover{background:rgba(255,255,255,0.25)}
+        .main{flex:1;display:flex;align-items:center;justify-content:center;padding:2rem 1rem}
+        .card-form,.card-andamento,.card-sucesso{background:white;border-radius:16px;padding:2rem;width:100%;max-width:480px;box-shadow:0 4px 24px rgba(0,0,0,0.08)}
+        h1{font-size:24px;font-weight:700;color:#0f172a;margin-bottom:6px}
+        .subtitle{color:#64748b;font-size:15px;margin-bottom:1.5rem}
+        .form-group{margin-bottom:1.25rem}
+        .form-group label{display:block;font-size:14px;font-weight:600;color:#374151;margin-bottom:6px}
+        .opt{font-weight:400;color:#94a3b8;font-size:12px}
+        .form-group select,.form-group textarea,.form-group input{width:100%;padding:11px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:15px;color:#1e293b;background:#f8fafc;font-family:inherit;transition:border-color 0.15s}
+        .form-group select:focus,.form-group textarea:focus,.form-group input:focus{outline:none;border-color:#0f4c75;background:white}
+        .erro{color:#dc2626;font-size:13px;margin-bottom:1rem;background:#fef2f2;padding:8px 12px;border-radius:8px}
+        .btn-iniciar{width:100%;padding:14px;background:#0f4c75;color:white;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;transition:all 0.15s;margin-top:0.5rem}
+        .btn-iniciar:hover{background:#0a3d5e}
+        .btn-iniciar:disabled{opacity:0.5;cursor:not-allowed}
+        .card-andamento{text-align:center;position:relative}
+        .andamento-header{position:relative;display:inline-block;margin-bottom:1.5rem}
+        .avatar-lg{width:80px;height:80px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:24px;color:white;margin:0 auto;position:relative;z-index:1}
+        .pulse-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:80px;height:80px;border-radius:50%;background:rgba(34,197,94,0.2);animation:pulseRing 2s infinite;z-index:0}
+        @keyframes pulseRing{0%{transform:translate(-50%,-50%) scale(1);opacity:0.8}100%{transform:translate(-50%,-50%) scale(1.8);opacity:0}}
+        .and-nome{font-size:22px;font-weight:700;color:#0f172a;margin-bottom:4px}
+        .and-ativ{font-size:16px;color:#475569;margin-bottom:1.5rem}
+        .and-obs{font-size:13px;color:#64748b;background:#f8fafc;border-radius:8px;padding:8px 12px;margin-bottom:1.5rem;border-left:3px solid #e2e8f0;text-align:left}
+        .timer-box{background:#f0f7ff;border-radius:12px;padding:1.25rem;margin-bottom:1.5rem}
+        .timer-label{display:block;font-size:12px;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em}
+        .timer-value{display:block;font-size:36px;font-weight:700;color:#0f4c75;font-variant-numeric:tabular-nums;line-height:1;margin-bottom:6px}
+        .timer-inicio{display:block;font-size:13px;color:#94a3b8}
+        .btn-finalizar{width:100%;padding:14px;background:#16a34a;color:white;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;transition:all 0.15s}
+        .btn-finalizar:hover{background:#15803d}
+        .btn-finalizar:disabled{opacity:0.5;cursor:not-allowed}
+        .card-sucesso{text-align:center;padding:3rem 2rem}
+        .sucesso-icon{width:72px;height:72px;border-radius:50%;background:#22c55e;color:white;font-size:32px;display:flex;align-items:center;justify-content:center;margin:0 auto 1rem}
+        .card-sucesso h2{font-size:22px;font-weight:700;color:#16a34a;margin-bottom:8px}
+        .card-sucesso p{color:#64748b}
+        @media(max-width:500px){.card-form,.card-andamento,.card-sucesso{padding:1.5rem}.timer-value{font-size:28px}}
+      `}</style>
     </div>
   );
 }
-
-const styles = `
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Inter', system-ui, sans-serif; background: #f1f5f9; min-height: 100vh; }
-  .page { min-height: 100vh; display: flex; flex-direction: column; }
-  .header { background: #0f4c75; }
-  .header-inner { max-width: 600px; margin: 0 auto; padding: 0 1.5rem; height: 60px; display: flex; align-items: center; justify-content: space-between; }
-  .logo { display: flex; align-items: center; gap: 10px; }
-  .logo-title { display: block; font-size: 16px; font-weight: 700; color: white; line-height: 1.1; }
-  .logo-sub { display: block; font-size: 11px; color: rgba(255,255,255,0.6); }
-  .user-bar { display: flex; align-items: center; gap: 8px; }
-  .avatar-sm { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 11px; color: white; }
-  .user-nome { font-size: 13px; color: rgba(255,255,255,0.85); }
-  .btn-sair { background: rgba(255,255,255,0.15); border: none; color: white; padding: 4px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; }
-  .btn-sair:hover { background: rgba(255,255,255,0.25); }
-  .main { flex: 1; display: flex; align-items: center; justify-content: center; padding: 2rem 1rem; }
-  .card-form, .card-andamento, .card-sucesso { background: white; border-radius: 16px; padding: 2rem; width: 100%; max-width: 480px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
-  h1 { font-size: 24px; font-weight: 700; color: #0f172a; margin-bottom: 6px; }
-  .subtitle { color: #64748b; font-size: 15px; margin-bottom: 1.5rem; }
-  .form-group { margin-bottom: 1.25rem; }
-  .form-group label { display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px; }
-  .opt { font-weight: 400; color: #94a3b8; font-size: 12px; }
-  .form-group select, .form-group textarea, .form-group input { width: 100%; padding: 11px 14px; border: 1.5px solid #e2e8f0; border-radius: 10px; font-size: 15px; color: #1e293b; background: #f8fafc; font-family: inherit; transition: border-color 0.15s; }
-  .form-group select:focus, .form-group textarea:focus, .form-group input:focus { outline: none; border-color: #0f4c75; background: white; }
-  .erro { color: #dc2626; font-size: 13px; margin-bottom: 1rem; background: #fef2f2; padding: 8px 12px; border-radius: 8px; }
-  .btn-iniciar { width: 100%; padding: 14px; background: #0f4c75; color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin-top: 0.5rem; }
-  .btn-iniciar:hover { background: #0a3d5e; }
-  .btn-iniciar:disabled { opacity: 0.5; cursor: not-allowed; }
-  .card-andamento { text-align: center; position: relative; }
-  .andamento-header { position: relative; display: inline-block; margin-bottom: 1.5rem; }
-  .avatar-lg { width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 24px; color: white; margin: 0 auto; position: relative; z-index: 1; }
-  .pulse-ring { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80px; height: 80px; border-radius: 50%; background: rgba(34,197,94,0.2); animation: pulseRing 2s infinite; z-index: 0; }
-  @keyframes pulseRing { 0% { transform: translate(-50%,-50%) scale(1); opacity: 0.8; } 100% { transform: translate(-50%,-50%) scale(1.8); opacity: 0; } }
-  .and-nome { font-size: 22px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
-  .and-ativ { font-size: 16px; color: #475569; margin-bottom: 1.5rem; }
-  .and-obs { font-size: 13px; color: #64748b; background: #f8fafc; border-radius: 8px; padding: 8px 12px; margin-bottom: 1.5rem; border-left: 3px solid #e2e8f0; text-align: left; }
-  .timer-box { background: #f0f7ff; border-radius: 12px; padding: 1.25rem; margin-bottom: 1.5rem; }
-  .timer-label { display: block; font-size: 12px; color: #64748b; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
-  .timer-value { display: block; font-size: 36px; font-weight: 700; color: #0f4c75; font-variant-numeric: tabular-nums; line-height: 1; margin-bottom: 6px; }
-  .timer-inicio { display: block; font-size: 13px; color: #94a3b8; }
-  .btn-finalizar { width: 100%; padding: 14px; background: #16a34a; color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-  .btn-finalizar:hover { background: #15803d; }
-  .btn-finalizar:disabled { opacity: 0.5; cursor: not-allowed; }
-  .card-sucesso { text-align: center; padding: 3rem 2rem; }
-  .sucesso-icon { width: 72px; height: 72px; border-radius: 50%; background: #22c55e; color: white; font-size: 32px; display: flex; align-items: center; justify-content: center; margin: 0 auto 1rem; }
-  .card-sucesso h2 { font-size: 22px; font-weight: 700; color: #16a34a; margin-bottom: 8px; }
-  .card-sucesso p { color: #64748b; }
-`;
