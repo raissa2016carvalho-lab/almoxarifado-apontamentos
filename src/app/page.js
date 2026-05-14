@@ -1,20 +1,13 @@
 "use client";
 import { useState, useEffect } from "react";
 import {
-  collection, addDoc, updateDoc, doc,
-  query, where, onSnapshot, serverTimestamp,
+  collection,
+  query,
+  where,
+  onSnapshot,
+  orderBy,
 } from "firebase/firestore";
-import {
-  signInWithEmailAndPassword, signOut, onAuthStateChanged,
-} from "firebase/auth";
-import { db, auth } from "@/lib/firebase";
-
-const ATIVIDADES = [
-  "Recebimento de mercadorias","Conferência de estoque","Separação de pedidos",
-  "Organização de prateleiras","Inventário","Emissão de nota fiscal",
-  "Carregamento / expedição","Devolução de produtos","Limpeza e organização",
-  "Atendimento interno","Outra",
-];
+import { db } from "@/lib/firebase";
 
 function formatDuration(startSeconds) {
   if (!startSeconds) return "...";
@@ -33,37 +26,31 @@ function formatTime(ts) {
   return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
+function formatDateTime(ts) {
+  if (!ts) return "--";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleString("pt-BR", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+
 function getInitials(name) {
-  if (!name) return "?";
   return name.split(" ").slice(0, 2).map((n) => n[0]).join("").toUpperCase();
 }
 
 const COLORS = ["#e63946","#2a9d8f","#e9c46a","#264653","#f4a261","#457b9d"];
 function getColor(name) {
-  if (!name) return COLORS[0];
   let h = 0;
   for (let i = 0; i < name.length; i++) h += name.charCodeAt(i);
   return COLORS[h % COLORS.length];
 }
 
-export default function FuncionarioPage() {
-  const [mounted, setMounted] = useState(false);
-  const [user, setUser] = useState(null);
-  const [authReady, setAuthReady] = useState(false);
-  const [perfil, setPerfil] = useState(null);
-  const [loginForm, setLoginForm] = useState({ email: "", senha: "" });
-  const [loginErro, setLoginErro] = useState("");
-  const [loginLoad, setLoginLoad] = useState(false);
-  const [step, setStep] = useState("inicio");
-  const [form, setForm] = useState({ atividade: "", obs: "" });
-  const [atividadeAtiva, setAtividadeAtiva] = useState(null);
-  const [loading, setLoading] = useState(false);
+export default function GestaoPage() {
+  const [ativas, setAtivas] = useState([]);
+  const [historico, setHistorico] = useState([]);
   const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    setMounted(true);
-    signOut(auth);
-  }, []);
+  const [abaHistorico, setAbaHistorico] = useState(false);
 
   useEffect(() => {
     const t = setInterval(() => setTick((v) => v + 1), 1000);
@@ -71,101 +58,26 @@ export default function FuncionarioPage() {
   }, []);
 
   useEffect(() => {
-    if (!mounted) return;
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u || null);
-      setAuthReady(true);
-    });
-    return () => unsub();
-  }, [mounted]);
-
-  useEffect(() => {
-    if (!user) { setPerfil(null); return; }
-    const q = query(collection(db, "funcionarios"), where("uid", "==", user.uid));
-    const unsub = onSnapshot(q, (snap) => {
-      if (!snap.empty) setPerfil({ id: snap.docs[0].id, ...snap.docs[0].data() });
-      else setPerfil(null);
-    });
-    return () => unsub();
-  }, [user]);
-
-  useEffect(() => {
-    if (!user) return;
     const q = query(
       collection(db, "apontamentos"),
-      where("uid", "==", user.uid),
-      where("status", "==", "ativo")
+      where("status", "==", "ativo"),
+      orderBy("inicio", "desc")
     );
-    const unsub = onSnapshot(q, (snap) => {
-      if (!snap.empty) {
-        setAtividadeAtiva({ id: snap.docs[0].id, ...snap.docs[0].data() });
-        setStep("emAndamento");
-      } else {
-        setAtividadeAtiva(null);
-        setStep((s) => s === "emAndamento" ? "inicio" : s);
-      }
+    return onSnapshot(q, (snap) => {
+      setAtivas(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
-    return () => unsub();
-  }, [user]);
+  }, []);
 
-  async function fazerLogin() {
-    setLoginErro("");
-    setLoginLoad(true);
-    try {
-      await signInWithEmailAndPassword(auth, loginForm.email, loginForm.senha);
-    } catch (e) {
-      setLoginErro("Email ou senha incorretos.");
-    }
-    setLoginLoad(false);
-  }
-
-  async function iniciarAtividade() {
-    if (!form.atividade || !perfil || !user) return;
-    setLoading(true);
-    try {
-      await addDoc(collection(db, "apontamentos"), {
-        uid: user.uid,
-        funcionario: perfil.nome,
-        atividade: form.atividade,
-        obs: form.obs || "",
-        inicio: serverTimestamp(),
-        fim: null,
-        status: "ativo",
-      });
-      setForm({ atividade: "", obs: "" });
-    } catch (e) {
-      alert("Erro: " + e.message);
-    }
-    setLoading(false);
-  }
-
-  async function finalizarAtividade() {
-    if (!atividadeAtiva) return;
-    setLoading(true);
-    try {
-      await updateDoc(doc(db, "apontamentos", atividadeAtiva.id), {
-        fim: serverTimestamp(),
-        status: "finalizado",
-      });
-      setStep("sucesso");
-      setTimeout(() => setStep("inicio"), 3000);
-    } catch (e) {
-      alert("Erro: " + e.message);
-    }
-    setLoading(false);
-  }
-
-  if (!mounted || !authReady) {
-    return (
-      <>
-        <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"1rem",color:"#64748b",fontFamily:"system-ui,sans-serif",background:"#f1f5f9"}}>
-          <div style={{width:36,height:36,border:"3px solid #e2e8f0",borderTopColor:"#0f4c75",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
-          <p>Carregando...</p>
-        </div>
-        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-      </>
+  useEffect(() => {
+    const q = query(
+      collection(db, "apontamentos"),
+      where("status", "==", "finalizado"),
+      orderBy("fim", "desc")
     );
-  }
+    return onSnapshot(q, (snap) => {
+      setHistorico(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+  }, []);
 
   return (
     <div className="page">
@@ -180,153 +92,158 @@ export default function FuncionarioPage() {
             </svg>
             <div>
               <span className="logo-title">Almoxarifado</span>
-              <span className="logo-sub">Apontamento de Atividades</span>
+              <span className="logo-sub">Painel de Gestão</span>
             </div>
           </div>
-          {user && perfil && (
-            <div className="user-bar">
-              <div className="avatar-sm" style={{background:getColor(perfil.nome)}}>{getInitials(perfil.nome)}</div>
-              <span className="user-nome">{perfil.nome}</span>
-              <button className="btn-sair" onClick={() => signOut(auth)}>Sair</button>
+          <div className="header-stats">
+            <div className="stat">
+              <span className="stat-num">{ativas.length}</span>
+              <span className="stat-label">Em andamento</span>
             </div>
-          )}
+            <div className="stat">
+              <span className="stat-num">{historico.length}</span>
+              <span className="stat-label">Finalizadas hoje</span>
+            </div>
+          </div>
         </div>
       </header>
 
       <main className="main">
-        {!user && (
-          <div className="card-form">
-            <h1>Entrar</h1>
-            <p className="subtitle">Use o login fornecido pelo seu gestor.</p>
-            <div className="form-group">
-              <label>Email</label>
-              <input type="email" placeholder="seu@email.com" value={loginForm.email}
-                onChange={(e) => setLoginForm({...loginForm, email: e.target.value})}
-                onKeyDown={(e) => e.key === "Enter" && fazerLogin()} />
-            </div>
-            <div className="form-group">
-              <label>Senha</label>
-              <input type="password" placeholder="••••••••" value={loginForm.senha}
-                onChange={(e) => setLoginForm({...loginForm, senha: e.target.value})}
-                onKeyDown={(e) => e.key === "Enter" && fazerLogin()} />
-            </div>
-            {loginErro && <p className="erro">{loginErro}</p>}
-            <button className="btn-iniciar" onClick={fazerLogin}
-              disabled={!loginForm.email || !loginForm.senha || loginLoad}>
-              {loginLoad ? "Entrando..." : "Entrar"}
-            </button>
-          </div>
-        )}
+        <div className="tabs">
+          <button className={!abaHistorico ? "tab active" : "tab"} onClick={() => setAbaHistorico(false)}>
+            Atividades em andamento
+            {ativas.length > 0 && <span className="badge">{ativas.length}</span>}
+          </button>
+          <button className={abaHistorico ? "tab active" : "tab"} onClick={() => setAbaHistorico(true)}>
+            Histórico
+            {historico.length > 0 && <span className="badge">{historico.length}</span>}
+          </button>
+        </div>
 
-        {user && !perfil && (
-          <div className="card-form">
-            <p style={{color:"#64748b",textAlign:"center"}}>Carregando perfil...</p>
-          </div>
-        )}
-
-        {user && perfil && step === "inicio" && (
-          <div className="card-form">
-            <h1>Olá, {perfil.nome.split(" ")[0]}! 👋</h1>
-            <p className="subtitle">Selecione a atividade que vai iniciar.</p>
-            <div className="form-group">
-              <label>Atividade</label>
-              <select value={form.atividade} onChange={(e) => setForm({...form, atividade: e.target.value})}>
-                <option value="">Selecione...</option>
-                {ATIVIDADES.map((a) => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </div>
-            {form.atividade && (
-              <div className="form-group">
-                <label>Observação <span className="opt">(opcional)</span></label>
-                <textarea placeholder="Detalhes adicionais..." value={form.obs}
-                  onChange={(e) => setForm({...form, obs: e.target.value})} rows={3} />
+        {!abaHistorico && (
+          <>
+            {ativas.length === 0 ? (
+              <div className="empty">
+                <p>Nenhuma atividade em andamento no momento.</p>
+              </div>
+            ) : (
+              <div className="grid">
+                {ativas.map((a) => (
+                  <div className="card" key={a.id}>
+                    <div className="card-top">
+                      <div className="avatar" style={{ background: getColor(a.funcionario) }}>
+                        {getInitials(a.funcionario)}
+                      </div>
+                      <div className="card-info">
+                        <span className="card-nome">{a.funcionario}</span>
+                        <span className="card-ativ">{a.atividade}</span>
+                      </div>
+                      <div className="dot" />
+                    </div>
+                    {a.obs && <p className="card-obs">{a.obs}</p>}
+                    <div className="card-footer">
+                      <span className="timer">{formatDuration(a.inicio?.seconds)}</span>
+                      <span className="inicio-time">Início: {formatTime(a.inicio)}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
-            <button className="btn-iniciar" onClick={iniciarAtividade}
-              disabled={!form.atividade || loading}>
-              {loading ? "Registrando..." : "▶ Iniciar atividade"}
-            </button>
-          </div>
+          </>
         )}
 
-        {user && perfil && step === "emAndamento" && atividadeAtiva && (
-          <div className="card-andamento">
-            <div className="andamento-header">
-              <div className="avatar-lg" style={{background:getColor(atividadeAtiva.funcionario)}}>
-                {getInitials(atividadeAtiva.funcionario)}
+        {abaHistorico && (
+          <>
+            {historico.length === 0 ? (
+              <div className="empty"><p>Nenhuma atividade finalizada ainda.</p></div>
+            ) : (
+              <div className="hist-list">
+                {historico.map((a) => {
+                  let duracao = "--";
+                  if (a.inicio && a.fim) {
+                    const diff = Math.floor(a.fim.seconds - a.inicio.seconds);
+                    const h = Math.floor(diff / 3600);
+                    const m = Math.floor((diff % 3600) / 60);
+                    duracao = h > 0 ? `${h}h ${m}m` : `${m}m`;
+                  }
+                  return (
+                    <div className="hist-item" key={a.id}>
+                      <div className="avatar sm" style={{ background: getColor(a.funcionario) }}>
+                        {getInitials(a.funcionario)}
+                      </div>
+                      <div className="hist-info">
+                        <span className="hist-nome">{a.funcionario}</span>
+                        <span className="hist-ativ">{a.atividade}</span>
+                        {a.obs && <span className="hist-obs">{a.obs}</span>}
+                      </div>
+                      <div className="hist-meta">
+                        <span className="hist-dur">{duracao}</span>
+                        <span className="hist-dt">{formatDateTime(a.fim)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              <div className="pulse-ring"/>
-            </div>
-            <h2 className="and-nome">{atividadeAtiva.funcionario}</h2>
-            <p className="and-ativ">{atividadeAtiva.atividade}</p>
-            {atividadeAtiva.obs && <p className="and-obs">{atividadeAtiva.obs}</p>}
-            <div className="timer-box">
-              <span className="timer-label">Tempo em andamento</span>
-              <span className="timer-value">{formatDuration(atividadeAtiva.inicio?.seconds)}</span>
-              <span className="timer-inicio">Início: {formatTime(atividadeAtiva.inicio)}</span>
-            </div>
-            <button className="btn-finalizar" onClick={finalizarAtividade} disabled={loading}>
-              {loading ? "Finalizando..." : "✓ Finalizar atividade"}
-            </button>
-          </div>
-        )}
-
-        {user && step === "sucesso" && (
-          <div className="card-sucesso">
-            <div className="sucesso-icon">✓</div>
-            <h2>Atividade finalizada!</h2>
-            <p>Registro salvo com sucesso.</p>
-          </div>
+            )}
+          </>
         )}
       </main>
 
       <style>{`
-        *{box-sizing:border-box;margin:0;padding:0}
-        body{font-family:'Inter',system-ui,sans-serif;background:#f1f5f9;min-height:100vh}
-        .page{min-height:100vh;display:flex;flex-direction:column}
-        .header{background:#0f4c75}
-        .header-inner{max-width:600px;margin:0 auto;padding:0 1.5rem;height:60px;display:flex;align-items:center;justify-content:space-between}
-        .logo{display:flex;align-items:center;gap:10px}
-        .logo-title{display:block;font-size:16px;font-weight:700;color:white;line-height:1.1}
-        .logo-sub{display:block;font-size:11px;color:rgba(255,255,255,0.6)}
-        .user-bar{display:flex;align-items:center;gap:8px}
-        .avatar-sm{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;color:white}
-        .user-nome{font-size:13px;color:rgba(255,255,255,0.85)}
-        .btn-sair{background:rgba(255,255,255,0.15);border:none;color:white;padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer}
-        .btn-sair:hover{background:rgba(255,255,255,0.25)}
-        .main{flex:1;display:flex;align-items:center;justify-content:center;padding:2rem 1rem}
-        .card-form,.card-andamento,.card-sucesso{background:white;border-radius:16px;padding:2rem;width:100%;max-width:480px;box-shadow:0 4px 24px rgba(0,0,0,0.08)}
-        h1{font-size:24px;font-weight:700;color:#0f172a;margin-bottom:6px}
-        .subtitle{color:#64748b;font-size:15px;margin-bottom:1.5rem}
-        .form-group{margin-bottom:1.25rem}
-        .form-group label{display:block;font-size:14px;font-weight:600;color:#374151;margin-bottom:6px}
-        .opt{font-weight:400;color:#94a3b8;font-size:12px}
-        .form-group select,.form-group textarea,.form-group input{width:100%;padding:11px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:15px;color:#1e293b;background:#f8fafc;font-family:inherit;transition:border-color 0.15s}
-        .form-group select:focus,.form-group textarea:focus,.form-group input:focus{outline:none;border-color:#0f4c75;background:white}
-        .erro{color:#dc2626;font-size:13px;margin-bottom:1rem;background:#fef2f2;padding:8px 12px;border-radius:8px}
-        .btn-iniciar{width:100%;padding:14px;background:#0f4c75;color:white;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;transition:all 0.15s;margin-top:0.5rem}
-        .btn-iniciar:hover{background:#0a3d5e}
-        .btn-iniciar:disabled{opacity:0.5;cursor:not-allowed}
-        .card-andamento{text-align:center;position:relative}
-        .andamento-header{position:relative;display:inline-block;margin-bottom:1.5rem}
-        .avatar-lg{width:80px;height:80px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:24px;color:white;margin:0 auto;position:relative;z-index:1}
-        .pulse-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:80px;height:80px;border-radius:50%;background:rgba(34,197,94,0.2);animation:pulseRing 2s infinite;z-index:0}
-        @keyframes pulseRing{0%{transform:translate(-50%,-50%) scale(1);opacity:0.8}100%{transform:translate(-50%,-50%) scale(1.8);opacity:0}}
-        .and-nome{font-size:22px;font-weight:700;color:#0f172a;margin-bottom:4px}
-        .and-ativ{font-size:16px;color:#475569;margin-bottom:1.5rem}
-        .and-obs{font-size:13px;color:#64748b;background:#f8fafc;border-radius:8px;padding:8px 12px;margin-bottom:1.5rem;border-left:3px solid #e2e8f0;text-align:left}
-        .timer-box{background:#f0f7ff;border-radius:12px;padding:1.25rem;margin-bottom:1.5rem}
-        .timer-label{display:block;font-size:12px;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em}
-        .timer-value{display:block;font-size:36px;font-weight:700;color:#0f4c75;font-variant-numeric:tabular-nums;line-height:1;margin-bottom:6px}
-        .timer-inicio{display:block;font-size:13px;color:#94a3b8}
-        .btn-finalizar{width:100%;padding:14px;background:#16a34a;color:white;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;transition:all 0.15s}
-        .btn-finalizar:hover{background:#15803d}
-        .btn-finalizar:disabled{opacity:0.5;cursor:not-allowed}
-        .card-sucesso{text-align:center;padding:3rem 2rem}
-        .sucesso-icon{width:72px;height:72px;border-radius:50%;background:#22c55e;color:white;font-size:32px;display:flex;align-items:center;justify-content:center;margin:0 auto 1rem}
-        .card-sucesso h2{font-size:22px;font-weight:700;color:#16a34a;margin-bottom:8px}
-        .card-sucesso p{color:#64748b}
-        @media(max-width:500px){.card-form,.card-andamento,.card-sucesso{padding:1.5rem}.timer-value{font-size:28px}}
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: #f1f5f9; min-height: 100vh; }
+
+        .header { background: #0f4c75; }
+        .header-inner { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem; height: 64px; display: flex; align-items: center; justify-content: space-between; }
+        .logo { display: flex; align-items: center; gap: 10px; }
+        .logo-title { display: block; font-size: 16px; font-weight: 700; color: white; line-height: 1.1; }
+        .logo-sub { display: block; font-size: 11px; color: rgba(255,255,255,0.6); }
+        .header-stats { display: flex; gap: 2rem; }
+        .stat { text-align: right; }
+        .stat-num { display: block; font-size: 22px; font-weight: 700; color: white; line-height: 1; }
+        .stat-label { display: block; font-size: 11px; color: rgba(255,255,255,0.6); }
+
+        .main { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+
+        .tabs { display: flex; gap: 4px; margin-bottom: 1.5rem; background: white; border-radius: 10px; padding: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); width: fit-content; }
+        .tab { padding: 8px 20px; border: none; background: transparent; border-radius: 8px; font-size: 14px; font-weight: 500; color: #64748b; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.15s; }
+        .tab.active { background: #0f4c75; color: white; }
+        .badge { background: #e2e8f0; color: #475569; border-radius: 20px; padding: 1px 8px; font-size: 12px; font-weight: 600; }
+        .tab.active .badge { background: rgba(255,255,255,0.25); color: white; }
+
+        .empty { text-align: center; padding: 4rem; color: #94a3b8; font-size: 15px; }
+
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+        .card { background: white; border-radius: 12px; padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; }
+        .card-top { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+        .avatar { width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; color: white; flex-shrink: 0; }
+        .avatar.sm { width: 36px; height: 36px; font-size: 12px; flex-shrink: 0; }
+        .card-info { flex: 1; }
+        .card-nome { display: block; font-weight: 600; font-size: 15px; color: #0f172a; }
+        .card-ativ { display: block; font-size: 13px; color: #64748b; margin-top: 2px; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; flex-shrink: 0; margin-top: 4px; animation: blink 2s infinite; }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .card-obs { font-size: 12px; color: #64748b; background: #f8fafc; border-radius: 6px; padding: 6px 10px; margin-bottom: 10px; border-left: 3px solid #e2e8f0; }
+        .card-footer { display: flex; justify-content: space-between; align-items: center; }
+        .timer { font-size: 20px; font-weight: 700; color: #0f4c75; font-variant-numeric: tabular-nums; }
+        .inicio-time { font-size: 12px; color: #94a3b8; }
+
+        .hist-list { display: flex; flex-direction: column; gap: 10px; }
+        .hist-item { background: white; border-radius: 10px; padding: 1rem 1.25rem; display: flex; align-items: center; gap: 14px; border: 1px solid #e2e8f0; }
+        .hist-info { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+        .hist-nome { font-size: 14px; font-weight: 600; color: #0f172a; }
+        .hist-ativ { font-size: 13px; color: #475569; }
+        .hist-obs { font-size: 12px; color: #94a3b8; }
+        .hist-meta { text-align: right; flex-shrink: 0; }
+        .hist-dur { display: block; font-size: 15px; font-weight: 700; color: #0f4c75; }
+        .hist-dt { display: block; font-size: 11px; color: #94a3b8; margin-top: 2px; }
+
+        @media (max-width: 600px) {
+          .header-stats { gap: 1rem; }
+          .stat-num { font-size: 18px; }
+          .tabs { width: 100%; }
+          .tab { flex: 1; justify-content: center; padding: 8px 10px; font-size: 13px; }
+        }
       `}</style>
     </div>
   );
