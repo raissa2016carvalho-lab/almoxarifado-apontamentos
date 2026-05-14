@@ -21,12 +21,6 @@ function formatTime(ts) {
   return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
-function formatDateTime(ts) {
-  if (!ts) return "--";
-  const d = ts.toDate ? ts.toDate() : new Date(ts);
-  return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
 function getInitials(name) {
   if (!name) return "?";
   return name.split(" ").slice(0, 2).map((n) => n[0]).join("").toUpperCase();
@@ -127,7 +121,6 @@ export default function GestaoPage() {
             Funcionários {ativas.length>0&&<span className="badge">{ativas.length} ativo{ativas.length>1?"s":""}</span>}
           </button>
           <button className={aba==="ranking"?"tab active":"tab"} onClick={()=>setAba("ranking")}>Ranking</button>
-          <a href="/gestao/admin" className="tab-link">⚙️ Admin</a>
         </div>
 
         {aba==="funcionarios" && (
@@ -137,22 +130,24 @@ export default function GestaoPage() {
             ) : (
               <div className="func-grid">
                 {funcionarios.map((f) => {
-                  const atividadeAtiva = f.atividades.find((a) => a.status==="ativo");
+                  const ativasFunc = f.atividades.filter((a) => a.status === "ativo");
                   const finalizadas = f.atividades.filter((a) => a.status==="finalizado");
                   return (
-                    <div className={`func-card ${atividadeAtiva?"func-card--ativa":""}`} key={f.nome}>
+                    <div className={`func-card ${ativasFunc.length > 0 ?"func-card--ativa":""}`} key={f.nome}>
                       <div className="func-header">
                         <div className="avatar" style={{background:getColor(f.nome)}}>{getInitials(f.nome)}</div>
                         <div className="func-info">
                           <span className="func-nome">{f.nome}</span>
-                          {atividadeAtiva
-                            ? <span className="status-tag ativo">● Em atividade</span>
+                          {ativasFunc.length > 0
+                            ? <span className="status-tag ativo">● {ativasFunc.length} em atividade</span>
                             : <span className="status-tag livre">○ Livre</span>}
                         </div>
                         <span className="func-count">{f.atividades.length} atividade{f.atividades.length>1?"s":""}</span>
                       </div>
-                      {atividadeAtiva && (
-                        <div className="ativ-atual">
+
+                      {/* Múltiplas atividades ativas */}
+                      {ativasFunc.map((atividadeAtiva) => (
+                        <div className="ativ-atual" key={atividadeAtiva.id}>
                           <div className="ativ-atual-row">
                             <span className="ativ-atual-nome">{atividadeAtiva.atividade}</span>
                             <span className="ativ-timer">{formatDuration(atividadeAtiva.inicio?.seconds)}</span>
@@ -160,7 +155,8 @@ export default function GestaoPage() {
                           <span className="ativ-inicio">Início: {formatTime(atividadeAtiva.inicio)}</span>
                           {atividadeAtiva.obs&&<span className="ativ-obs">{atividadeAtiva.obs}</span>}
                         </div>
-                      )}
+                      ))}
+
                       {finalizadas.length>0 && (
                         <div className="ativ-lista">
                           <span className="ativ-lista-label">Histórico do dia</span>
@@ -261,8 +257,6 @@ export default function GestaoPage() {
         .tabs{display:flex;gap:4px;margin-bottom:1.5rem;background:white;border-radius:10px;padding:4px;box-shadow:0 1px 3px rgba(0,0,0,0.06);width:fit-content;align-items:center}
         .tab{padding:8px 20px;border:none;background:transparent;border-radius:8px;font-size:14px;font-weight:500;color:#64748b;cursor:pointer;display:flex;align-items:center;gap:8px;transition:all 0.15s}
         .tab.active{background:#0f4c75;color:white}
-        .tab-link{padding:8px 16px;border-radius:8px;font-size:13px;font-weight:500;color:#64748b;text-decoration:none;transition:all 0.15s}
-        .tab-link:hover{background:#f1f5f9}
         .badge{background:#dcfce7;color:#16a34a;border-radius:20px;padding:1px 8px;font-size:12px;font-weight:600}
         .tab.active .badge{background:rgba(255,255,255,0.25);color:white}
         .empty{text-align:center;padding:4rem;color:#94a3b8;font-size:15px}
@@ -278,7 +272,7 @@ export default function GestaoPage() {
         .status-tag.ativo{color:#16a34a}
         .status-tag.livre{color:#94a3b8}
         .func-count{font-size:12px;color:#94a3b8;flex-shrink:0}
-        .ativ-atual{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-bottom:12px}
+        .ativ-atual{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-bottom:8px}
         .ativ-atual-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px}
         .ativ-atual-nome{font-size:13px;font-weight:600;color:#15803d}
         .ativ-timer{font-size:16px;font-weight:700;color:#15803d;font-variant-numeric:tabular-nums}
