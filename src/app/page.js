@@ -19,7 +19,7 @@ const ATIVIDADES = [
 ];
 
 function formatDuration(startSeconds) {
-  if (!startSeconds) return "...";
+  if (!startSeconds) return "0s";
   const diff = Math.floor(Date.now() / 1000) - startSeconds;
   const h = Math.floor(diff / 3600);
   const m = Math.floor((diff % 3600) / 60);
@@ -47,74 +47,88 @@ function getColor(name) {
 }
 
 export default function FuncionarioPage() {
-  const [step, setStep] = useState("inicio");
-  const [form, setForm] = useState({ funcionario: "", atividade: "", obs: "" });
-  const [atividadeAtiva, setAtividadeAtiva] = useState(null);
+  const [funcionario, setFuncionario] = useState("");
+  const [atividades, setAtividades] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ atividade: "", obs: "" });
   const [loading, setLoading] = useState(false);
+  const [encerrandoId, setEncerrandoId] = useState(null);
   const [tick, setTick] = useState(0);
 
+  // Tick para atualizar cronômetros a cada segundo
   useEffect(() => {
     const t = setInterval(() => setTick((v) => v + 1), 1000);
     return () => clearInterval(t);
   }, []);
 
+  // Recuperar nome salvo no localStorage ao carregar a página
   useEffect(() => {
-    if (!form.funcionario) { setAtividadeAtiva(null); return; }
+    const saved = localStorage.getItem("almox_funcionario");
+    if (saved) setFuncionario(saved);
+  }, []);
+
+  // Salvar nome no localStorage sempre que mudar
+  useEffect(() => {
+    if (funcionario) {
+      localStorage.setItem("almox_funcionario", funcionario);
+    }
+  }, [funcionario]);
+
+  // Escutar atividades ativas do funcionário em tempo real
+  useEffect(() => {
+    if (!funcionario) { setAtividades([]); return; }
     const q = query(
       collection(db, "apontamentos"),
-      where("funcionario", "==", form.funcionario),
+      where("funcionario", "==", funcionario),
       where("status", "==", "ativo")
     );
     const unsub = onSnapshot(q, (snap) => {
-      if (!snap.empty) {
-        setAtividadeAtiva({ id: snap.docs[0].id, ...snap.docs[0].data() });
-        setStep("emAndamento");
-      } else {
-        setAtividadeAtiva(null);
-        setStep("inicio");
-      }
+      setAtividades(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
     return () => unsub();
-  }, [form.funcionario]);
+  }, [funcionario]);
 
   async function iniciarAtividade() {
-    if (!form.funcionario || !form.atividade) return;
+    if (!funcionario || !form.atividade) return;
     setLoading(true);
     try {
       await addDoc(collection(db, "apontamentos"), {
-        funcionario: form.funcionario,
+        funcionario,
         atividade: form.atividade,
         obs: form.obs || "",
         inicio: serverTimestamp(),
         fim: null,
         status: "ativo",
       });
-      setStep("emAndamento");
+      setForm({ atividade: "", obs: "" });
+      setShowForm(false);
     } catch (e) {
-      alert("Erro: " + e.message);
+      alert("Erro ao iniciar: " + e.message);
     }
     setLoading(false);
   }
 
-  async function finalizarAtividade() {
-    if (!atividadeAtiva) return;
-    setLoading(true);
+  async function encerrarAtividade(id) {
+    setEncerrandoId(id);
     try {
-      await updateDoc(doc(db, "apontamentos", atividadeAtiva.id), {
+      await updateDoc(doc(db, "apontamentos", id), {
         fim: serverTimestamp(),
         status: "finalizado",
       });
-      setStep("sucesso");
-      setTimeout(() => {
-        setStep("inicio");
-        setForm({ funcionario: "", atividade: "", obs: "" });
-        setAtividadeAtiva(null);
-      }, 3000);
     } catch (e) {
-      alert("Erro: " + e.message);
+      alert("Erro ao encerrar: " + e.message);
     }
-    setLoading(false);
+    setEncerrandoId(null);
   }
+
+  function trocarFuncionario() {
+    localStorage.removeItem("almox_funcionario");
+    setFuncionario("");
+    setAtividades([]);
+    setShowForm(false);
+  }
+
+  const cor = funcionario ? getColor(funcionario) : "#0f4c75";
 
   return (
     <div className="page">
@@ -132,71 +146,119 @@ export default function FuncionarioPage() {
               <span className="logo-sub">Apontamento de Atividades</span>
             </div>
           </div>
+          {funcionario && (
+            <button className="btn-trocar" onClick={trocarFuncionario}>
+              Trocar usuário
+            </button>
+          )}
         </div>
       </header>
 
       <main className="main">
-        {step === "inicio" && (
+
+        {/* PASSO 1 — Seleção de funcionário */}
+        {!funcionario && (
           <div className="card-form">
             <h1>Olá! 👋</h1>
-            <p className="subtitle">Selecione seu nome e a atividade que vai iniciar.</p>
+            <p className="subtitle">Selecione seu nome para começar.</p>
             <div className="form-group">
               <label>Seu nome</label>
-              <select value={form.funcionario} onChange={(e) => setForm({...form, funcionario: e.target.value, atividade: ""})}>
+              <select value={funcionario} onChange={(e) => setFuncionario(e.target.value)}>
                 <option value="">Selecione...</option>
                 {FUNCIONARIOS.map((f) => <option key={f} value={f}>{f}</option>)}
               </select>
             </div>
-            {form.funcionario && (
-              <div className="form-group">
-                <label>Atividade</label>
-                <select value={form.atividade} onChange={(e) => setForm({...form, atividade: e.target.value})}>
-                  <option value="">Selecione...</option>
-                  {ATIVIDADES.map((a) => <option key={a} value={a}>{a}</option>)}
-                </select>
-              </div>
-            )}
-            {form.funcionario && form.atividade && (
-              <div className="form-group">
-                <label>Observação <span className="opt">(opcional)</span></label>
-                <textarea placeholder="Detalhes adicionais..." value={form.obs}
-                  onChange={(e) => setForm({...form, obs: e.target.value})} rows={3}/>
-              </div>
-            )}
-            <button className="btn-iniciar" onClick={iniciarAtividade}
-              disabled={!form.funcionario || !form.atividade || loading}>
-              {loading ? "Registrando..." : "▶ Iniciar atividade"}
-            </button>
           </div>
         )}
 
-        {step === "emAndamento" && atividadeAtiva && (
-          <div className="card-andamento">
-            <div className="andamento-header">
-              <div className="avatar-lg" style={{background: getColor(atividadeAtiva.funcionario)}}>
-                {getInitials(atividadeAtiva.funcionario)}
-              </div>
-              <div className="pulse-ring"/>
-            </div>
-            <h2 className="and-nome">{atividadeAtiva.funcionario}</h2>
-            <p className="and-ativ">{atividadeAtiva.atividade}</p>
-            {atividadeAtiva.obs && <p className="and-obs">{atividadeAtiva.obs}</p>}
-            <div className="timer-box">
-              <span className="timer-label">Tempo em andamento</span>
-              <span className="timer-value">{formatDuration(atividadeAtiva.inicio?.seconds)}</span>
-              <span className="timer-inicio">Início: {formatTime(atividadeAtiva.inicio)}</span>
-            </div>
-            <button className="btn-finalizar" onClick={finalizarAtividade} disabled={loading}>
-              {loading ? "Finalizando..." : "✓ Finalizar atividade"}
-            </button>
-          </div>
-        )}
+        {/* PASSO 2 — Painel do funcionário */}
+        {funcionario && (
+          <div className="painel">
 
-        {step === "sucesso" && (
-          <div className="card-sucesso">
-            <div className="sucesso-icon">✓</div>
-            <h2>Atividade finalizada!</h2>
-            <p>Registro salvo com sucesso.</p>
+            {/* Cabeçalho do funcionário */}
+            <div className="func-header-card">
+              <div className="avatar-lg" style={{ background: cor }}>
+                {getInitials(funcionario)}
+              </div>
+              <div>
+                <span className="func-nome">{funcionario}</span>
+                <span className="func-status">
+                  {atividades.length === 0
+                    ? "Nenhuma atividade em andamento"
+                    : `${atividades.length} atividade${atividades.length > 1 ? "s" : ""} em andamento`}
+                </span>
+              </div>
+            </div>
+
+            {/* Lista de atividades abertas */}
+            {atividades.length > 0 && (
+              <div className="ativ-lista">
+                {atividades.map((a) => (
+                  <div className="ativ-card" key={a.id}>
+                    <div className="ativ-card-top">
+                      <div className="ativ-info">
+                        <span className="ativ-nome">{a.atividade}</span>
+                        {a.obs && <span className="ativ-obs">{a.obs}</span>}
+                        <span className="ativ-inicio">Início: {formatTime(a.inicio)}</span>
+                      </div>
+                      <div className="ativ-timer-box">
+                        <span className="ativ-timer">{formatDuration(a.inicio?.seconds)}</span>
+                        <div className="pulse-dot"/>
+                      </div>
+                    </div>
+                    <button
+                      className="btn-encerrar"
+                      onClick={() => encerrarAtividade(a.id)}
+                      disabled={encerrandoId === a.id}
+                    >
+                      {encerrandoId === a.id ? "Encerrando..." : "✓ Encerrar atividade"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Botão de nova atividade ou formulário */}
+            {!showForm ? (
+              <button className="btn-nova" onClick={() => setShowForm(true)}>
+                + Nova atividade
+              </button>
+            ) : (
+              <div className="card-form card-form--inline">
+                <h2>Nova atividade</h2>
+                <div className="form-group">
+                  <label>Atividade</label>
+                  <select value={form.atividade} onChange={(e) => setForm({ ...form, atividade: e.target.value })}>
+                    <option value="">Selecione...</option>
+                    {ATIVIDADES.map((a) => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                </div>
+                {form.atividade && (
+                  <div className="form-group">
+                    <label>Observação <span className="opt">(opcional)</span></label>
+                    <textarea
+                      placeholder="Detalhes adicionais..."
+                      value={form.obs}
+                      onChange={(e) => setForm({ ...form, obs: e.target.value })}
+                      rows={2}
+                    />
+                  </div>
+                )}
+                <div className="form-actions">
+                  <button className="btn-cancelar" onClick={() => { setShowForm(false); setForm({ atividade: "", obs: "" }); }}>
+                    Cancelar
+                  </button>
+                  <button
+                    className="btn-iniciar"
+                    onClick={iniciarAtividade}
+                    disabled={!form.atividade || loading}
+                  >
+                    {loading ? "Registrando..." : "▶ Iniciar"}
+                  </button>
+                </div>
+              </div>
+            )}
+
           </div>
         )}
       </main>
@@ -206,42 +268,51 @@ export default function FuncionarioPage() {
         body{font-family:'Inter',system-ui,sans-serif;background:#f1f5f9;min-height:100vh}
         .page{min-height:100vh;display:flex;flex-direction:column}
         .header{background:#0f4c75}
-        .header-inner{max-width:600px;margin:0 auto;padding:0 1.5rem;height:60px;display:flex;align-items:center}
+        .header-inner{max-width:600px;margin:0 auto;padding:0 1.5rem;height:60px;display:flex;align-items:center;justify-content:space-between}
         .logo{display:flex;align-items:center;gap:10px}
         .logo-title{display:block;font-size:16px;font-weight:700;color:white;line-height:1.1}
         .logo-sub{display:block;font-size:11px;color:rgba(255,255,255,0.6)}
-        .main{flex:1;display:flex;align-items:center;justify-content:center;padding:2rem 1rem}
-        .card-form,.card-andamento,.card-sucesso{background:white;border-radius:16px;padding:2rem;width:100%;max-width:480px;box-shadow:0 4px 24px rgba(0,0,0,0.08)}
+        .btn-trocar{background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer;transition:all 0.15s}
+        .btn-trocar:hover{background:rgba(255,255,255,0.25)}
+        .main{flex:1;display:flex;align-items:flex-start;justify-content:center;padding:2rem 1rem}
+        .card-form{background:white;border-radius:16px;padding:2rem;width:100%;max-width:520px;box-shadow:0 4px 24px rgba(0,0,0,0.08)}
+        .card-form--inline{margin-top:0;box-shadow:none;border:1.5px solid #e2e8f0;padding:1.5rem}
         h1{font-size:24px;font-weight:700;color:#0f172a;margin-bottom:6px}
+        h2{font-size:18px;font-weight:700;color:#0f172a;margin-bottom:1.25rem}
         .subtitle{color:#64748b;font-size:15px;margin-bottom:1.5rem}
         .form-group{margin-bottom:1.25rem}
         .form-group label{display:block;font-size:14px;font-weight:600;color:#374151;margin-bottom:6px}
         .opt{font-weight:400;color:#94a3b8;font-size:12px}
         .form-group select,.form-group textarea{width:100%;padding:11px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:15px;color:#1e293b;background:#f8fafc;font-family:inherit;transition:border-color 0.15s}
         .form-group select:focus,.form-group textarea:focus{outline:none;border-color:#0f4c75;background:white}
-        .btn-iniciar{width:100%;padding:14px;background:#0f4c75;color:white;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;transition:all 0.15s;margin-top:0.5rem}
+        .form-actions{display:flex;gap:10px}
+        .btn-cancelar{flex:1;padding:12px;background:#f1f5f9;color:#64748b;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer}
+        .btn-cancelar:hover{background:#e2e8f0}
+        .btn-iniciar{flex:2;padding:12px;background:#0f4c75;color:white;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.15s}
         .btn-iniciar:hover{background:#0a3d5e}
         .btn-iniciar:disabled{opacity:0.5;cursor:not-allowed}
-        .card-andamento{text-align:center;position:relative}
-        .andamento-header{position:relative;display:inline-block;margin-bottom:1.5rem}
-        .avatar-lg{width:80px;height:80px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:24px;color:white;margin:0 auto;position:relative;z-index:1}
-        .pulse-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:80px;height:80px;border-radius:50%;background:rgba(34,197,94,0.2);animation:pulseRing 2s infinite;z-index:0}
-        @keyframes pulseRing{0%{transform:translate(-50%,-50%) scale(1);opacity:0.8}100%{transform:translate(-50%,-50%) scale(1.8);opacity:0}}
-        .and-nome{font-size:22px;font-weight:700;color:#0f172a;margin-bottom:4px}
-        .and-ativ{font-size:16px;color:#475569;margin-bottom:1.5rem}
-        .and-obs{font-size:13px;color:#64748b;background:#f8fafc;border-radius:8px;padding:8px 12px;margin-bottom:1.5rem;border-left:3px solid #e2e8f0;text-align:left}
-        .timer-box{background:#f0f7ff;border-radius:12px;padding:1.25rem;margin-bottom:1.5rem}
-        .timer-label{display:block;font-size:12px;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em}
-        .timer-value{display:block;font-size:36px;font-weight:700;color:#0f4c75;font-variant-numeric:tabular-nums;line-height:1;margin-bottom:6px}
-        .timer-inicio{display:block;font-size:13px;color:#94a3b8}
-        .btn-finalizar{width:100%;padding:14px;background:#16a34a;color:white;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;transition:all 0.15s}
-        .btn-finalizar:hover{background:#15803d}
-        .btn-finalizar:disabled{opacity:0.5;cursor:not-allowed}
-        .card-sucesso{text-align:center;padding:3rem 2rem}
-        .sucesso-icon{width:72px;height:72px;border-radius:50%;background:#22c55e;color:white;font-size:32px;display:flex;align-items:center;justify-content:center;margin:0 auto 1rem}
-        .card-sucesso h2{font-size:22px;font-weight:700;color:#16a34a;margin-bottom:8px}
-        .card-sucesso p{color:#64748b}
-        @media(max-width:500px){.card-form,.card-andamento,.card-sucesso{padding:1.5rem}.timer-value{font-size:28px}}
+        .painel{width:100%;max-width:520px;display:flex;flex-direction:column;gap:16px}
+        .func-header-card{background:white;border-radius:14px;padding:1.25rem 1.5rem;display:flex;align-items:center;gap:14px;box-shadow:0 2px 12px rgba(0,0,0,0.06)}
+        .avatar-lg{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:white;flex-shrink:0}
+        .func-nome{display:block;font-size:18px;font-weight:700;color:#0f172a}
+        .func-status{display:block;font-size:13px;color:#64748b;margin-top:2px}
+        .ativ-lista{display:flex;flex-direction:column;gap:12px}
+        .ativ-card{background:white;border-radius:14px;padding:1.25rem;border:1.5px solid #bbf7d0;box-shadow:0 2px 12px rgba(0,0,0,0.05)}
+        .ativ-card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;gap:12px}
+        .ativ-info{flex:1}
+        .ativ-nome{display:block;font-size:15px;font-weight:700;color:#0f172a;margin-bottom:3px}
+        .ativ-obs{display:block;font-size:12px;color:#64748b;font-style:italic;margin-bottom:4px}
+        .ativ-inicio{display:block;font-size:12px;color:#94a3b8}
+        .ativ-timer-box{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0}
+        .ativ-timer{font-size:22px;font-weight:700;color:#15803d;font-variant-numeric:tabular-nums;line-height:1}
+        .pulse-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite;align-self:flex-end}
+        @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(1.3)}}
+        .btn-encerrar{width:100%;padding:11px;background:#f0fdf4;color:#16a34a;border:1.5px solid #86efac;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.15s}
+        .btn-encerrar:hover{background:#dcfce7;border-color:#4ade80}
+        .btn-encerrar:disabled{opacity:0.5;cursor:not-allowed}
+        .btn-nova{width:100%;padding:14px;background:#0f4c75;color:white;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer;transition:all 0.15s;letter-spacing:0.01em}
+        .btn-nova:hover{background:#0a3d5e;transform:translateY(-1px);box-shadow:0 4px 12px rgba(15,76,117,0.3)}
+        @media(max-width:500px){.main{padding:1rem 0.75rem}.card-form{padding:1.5rem}.ativ-timer{font-size:18px}}
       `}</style>
     </div>
   );
