@@ -60,8 +60,11 @@ export default function FuncionarioPage() {
   const [loading, setLoading] = useState(false);
   const [tick, setTick] = useState(0);
 
-  // Garante que só renderiza no client
-  useEffect(() => { setMounted(true); }, []);
+  // Monta no client e faz logout automático ao carregar
+  useEffect(() => {
+    setMounted(true);
+    signOut(auth);
+  }, []);
 
   // Timer
   useEffect(() => {
@@ -85,6 +88,7 @@ export default function FuncionarioPage() {
     const q = query(collection(db, "funcionarios"), where("uid", "==", user.uid));
     const unsub = onSnapshot(q, (snap) => {
       if (!snap.empty) setPerfil({ id: snap.docs[0].id, ...snap.docs[0].data() });
+      else setPerfil(null);
     });
     return () => unsub();
   }, [user]);
@@ -121,7 +125,7 @@ export default function FuncionarioPage() {
   }
 
   async function iniciarAtividade() {
-    if (!form.atividade || !perfil) return;
+    if (!form.atividade || !perfil || !user) return;
     setLoading(true);
     try {
       await addDoc(collection(db, "apontamentos"), {
@@ -156,7 +160,6 @@ export default function FuncionarioPage() {
     setLoading(false);
   }
 
-  // Ainda não montou no client
   if (!mounted || !authReady) {
     return (
       <>
@@ -213,15 +216,22 @@ export default function FuncionarioPage() {
                 onKeyDown={(e) => e.key === "Enter" && fazerLogin()} />
             </div>
             {loginErro && <p className="erro">{loginErro}</p>}
-            <button className="btn-iniciar" onClick={fazerLogin} disabled={!loginForm.email || !loginForm.senha || loginLoad}>
+            <button className="btn-iniciar" onClick={fazerLogin}
+              disabled={!loginForm.email || !loginForm.senha || loginLoad}>
               {loginLoad ? "Entrando..." : "Entrar"}
             </button>
           </div>
         )}
 
-        {user && step === "inicio" && (
+        {user && !perfil && (
           <div className="card-form">
-            <h1>Olá, {perfil?.nome?.split(" ")[0] || ""}! 👋</h1>
+            <p style={{color:"#64748b",textAlign:"center"}}>Carregando perfil...</p>
+          </div>
+        )}
+
+        {user && perfil && step === "inicio" && (
+          <div className="card-form">
+            <h1>Olá, {perfil.nome.split(" ")[0]}! 👋</h1>
             <p className="subtitle">Selecione a atividade que vai iniciar.</p>
             <div className="form-group">
               <label>Atividade</label>
@@ -237,13 +247,14 @@ export default function FuncionarioPage() {
                   onChange={(e) => setForm({...form, obs: e.target.value})} rows={3} />
               </div>
             )}
-            <button className="btn-iniciar" onClick={iniciarAtividade} disabled={!form.atividade || loading}>
+            <button className="btn-iniciar" onClick={iniciarAtividade}
+              disabled={!form.atividade || loading}>
               {loading ? "Registrando..." : "▶ Iniciar atividade"}
             </button>
           </div>
         )}
 
-        {user && step === "emAndamento" && atividadeAtiva && (
+        {user && perfil && step === "emAndamento" && atividadeAtiva && (
           <div className="card-andamento">
             <div className="andamento-header">
               <div className="avatar-lg" style={{background:getColor(atividadeAtiva.funcionario)}}>
