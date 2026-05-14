@@ -1,9 +1,0 @@
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /apontamentos/{docId} {
-      // Qualquer pessoa na rede pode ler e escrever (uso interno)
-      allow read, write: if true;
-    }
-  }
-}
