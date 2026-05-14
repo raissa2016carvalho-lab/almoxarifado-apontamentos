@@ -60,19 +60,16 @@ export default function FuncionarioPage() {
   const [loading, setLoading] = useState(false);
   const [tick, setTick] = useState(0);
 
-  // Monta no client e faz logout automático ao carregar
   useEffect(() => {
     setMounted(true);
     signOut(auth);
   }, []);
 
-  // Timer
   useEffect(() => {
     const t = setInterval(() => setTick((v) => v + 1), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // Auth state
   useEffect(() => {
     if (!mounted) return;
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -82,7 +79,6 @@ export default function FuncionarioPage() {
     return () => unsub();
   }, [mounted]);
 
-  // Perfil do Firestore
   useEffect(() => {
     if (!user) { setPerfil(null); return; }
     const q = query(collection(db, "funcionarios"), where("uid", "==", user.uid));
@@ -93,7 +89,6 @@ export default function FuncionarioPage() {
     return () => unsub();
   }, [user]);
 
-  // Atividade ativa
   useEffect(() => {
     if (!user) return;
     const q = query(
